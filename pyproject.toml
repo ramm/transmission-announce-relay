@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "transmission-announce-relay"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local announce relay for Transmission: fresh verified HTTPS connection per announce, hedged stalls, bounded retry. Standard library only."
 readme = "README.md"
 requires-python = ">=3.8"

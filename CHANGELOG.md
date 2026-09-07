@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- `tar-ctl`: tolerate Transmission re-serialising tracker lists (it appends a
+  trailing newline), which made `route --apply` report `not_verified` after a
+  successful change and `restore` refuse unchanged torrents.
+
 ## 0.1.0
 
 First release.

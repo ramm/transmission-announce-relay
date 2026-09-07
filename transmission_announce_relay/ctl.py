@@ -91,6 +91,15 @@ def matcher(host=None, regex=None):
     return match
 
 
+def normalized(tracker_list):
+    """Transmission re-serialises tracker lists (e.g. adds a trailing newline); compare shapes, not bytes."""
+    return '\n'.join(line.strip() for line in tracker_list.strip().splitlines())
+
+
+def same_list(left, right):
+    return normalized(left) == normalized(right)
+
+
 def substitute(tracker_list, match, replacement):
     """Replace matching tracker lines; everything else is preserved exactly."""
     lines = tracker_list.split('\n')
@@ -207,7 +216,7 @@ def cmd_route(client, output, args):
         if index:
             time.sleep(args.pace)
         fresh = client.torrent(row['hashString'], ['id', 'hashString', 'trackerList'])
-        if fresh['trackerList'] != current:
+        if not same_list(fresh['trackerList'], current):
             output.emit({'event': 'skipped_changed_meanwhile', 'id': row['id']}, error=True)
             continue
         entry = state['torrents'].setdefault(row['hashString'].lower(), {})
@@ -217,7 +226,7 @@ def cmd_route(client, output, args):
         save_state(args.state, state)  # durable before the RPC
         client.set_tracker_list(row['hashString'], proposed)
         after = client.torrent(row['hashString'], ['id', 'trackerList'])
-        if after['trackerList'] != proposed:
+        if not same_list(after['trackerList'], proposed):
             output.emit({'event': 'not_verified', 'id': row['id']}, error=True)
             return 1
         if args.reannounce:
@@ -241,7 +250,7 @@ def cmd_restore(client, output, args):
         entry = known.get(row['hashString'].lower())
         if entry is None:
             continue
-        if row['trackerList'] != entry['routed'] and not args.force:
+        if not same_list(row['trackerList'], entry['routed']) and not args.force:
             output.emit({'event': 'skipped_unexpected_tracker_list', 'id': row['id']}, error=True)
             continue
         plan.append((row, entry))
@@ -255,12 +264,12 @@ def cmd_restore(client, output, args):
         if index:
             time.sleep(args.pace)
         fresh = client.torrent(row['hashString'], ['id', 'hashString', 'trackerList'])
-        if fresh['trackerList'] != entry['routed'] and not args.force:
+        if not same_list(fresh['trackerList'], entry['routed']) and not args.force:
             output.emit({'event': 'skipped_changed_meanwhile', 'id': row['id']}, error=True)
             continue
         client.set_tracker_list(row['hashString'], entry['original'])
         after = client.torrent(row['hashString'], ['id', 'trackerList'])
-        if after['trackerList'] != entry['original']:
+        if not same_list(after['trackerList'], entry['original']):
             output.emit({'event': 'not_verified', 'id': row['id']}, error=True)
             return 1
         del known[row['hashString'].lower()]

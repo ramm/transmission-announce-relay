@@ -33,7 +33,8 @@ class FakeClient:
 
     def set_tracker_list(self, hash_string, tracker_list):
         self.calls.append(('set', hash_string, tracker_list))
-        self.rows[hash_string]['trackerList'] = tracker_list
+        # Real Transmission re-serialises the list and always ends it with a newline.
+        self.rows[hash_string]['trackerList'] = tracker_list.rstrip('\n') + '\n'
 
     def reannounce(self, hash_string):
         self.calls.append(('reannounce', hash_string))
@@ -47,6 +48,11 @@ class SubstituteTests(unittest.TestCase):
         self.assertEqual(changed, 2)
         self.assertEqual(result, LOCAL + '\n\n' + OTHER + '\n' + LOCAL + '\n')
         self.assertEqual(ctl.substitute(OTHER + '\n', match, LOCAL), (OTHER + '\n', 0))
+
+    def test_transmission_normalisation_is_tolerated(self):
+        self.assertTrue(ctl.same_list(LOCAL, LOCAL + '\n'))
+        self.assertTrue(ctl.same_list(UP + '\n\n' + OTHER, UP + '\r\n\r\n' + OTHER + '\n'))
+        self.assertFalse(ctl.same_list(UP, OTHER))
 
     def test_regex_and_host_selectors(self):
         self.assertTrue(ctl.matcher(regex=r'/PASSKEY/')(UP))
@@ -64,7 +70,7 @@ class CommandTests(unittest.TestCase):
             row(1, 'a', UP + '\n'),
             row(2, 'b', UP + '\n\n' + OTHER + '\n', status=0, done=0.4),
             row(3, 'c', OTHER + '\n', name='Unrelated'),
-            row(4, 'd', UP + '\n', name='Skip me'),
+            row(4, 'd', UP, name='Skip me'),  # no trailing newline, as some clients store it
         ])
         self.health = {'status': 'ready', 'routes': {'example': {'queue_depth': 0, 'active_upstream': 0,
                                                                  'transport': {'upstream_valid_announces': 5}}}}
@@ -108,7 +114,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual([c[0] for c in self.client.calls], ['set', 'set'])
         self.assertEqual(self.client.rows['a' * 40]['trackerList'], LOCAL + '\n')
         self.assertEqual(self.client.rows['b' * 40]['trackerList'], LOCAL + '\n\n' + OTHER + '\n')
-        self.assertEqual(self.client.rows['d' * 40]['trackerList'], UP + '\n')  # excluded by name filter
+        self.assertEqual(self.client.rows['d' * 40]['trackerList'], UP)  # excluded by name filter
         sleep.assert_called_once_with(7.0)
         state = ctl.load_state(self.state)
         self.assertEqual(state['torrents']['a' * 40]['original'], UP + '\n')
@@ -133,7 +139,7 @@ class CommandTests(unittest.TestCase):
         code, events, errors = self.run_cli('restore', '--all', '--apply', '--reannounce')
         self.assertEqual(code, 0)
         self.assertEqual(self.client.rows['a' * 40]['trackerList'], UP + '\n')
-        self.assertEqual(self.client.rows['d' * 40]['trackerList'], UP + '\n')
+        self.assertEqual(self.client.rows['d' * 40]['trackerList'], UP + '\n')  # restored, newline added by client
         self.assertEqual(self.client.rows['b' * 40]['trackerList'], 'http://changed.example/announce\n')
         self.assertEqual([e['event'] for e in errors], ['skipped_unexpected_tracker_list'])
         self.assertIn(('reannounce', 'a' * 40), self.client.calls)
