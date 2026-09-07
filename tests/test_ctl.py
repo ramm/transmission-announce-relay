@@ -172,7 +172,7 @@ class CommandTests(unittest.TestCase):
     def test_output_modes(self):
         self.assertEqual(ctl.resolve_mode(environ={}), 'human')
         self.assertEqual(ctl.resolve_mode(environ={'AGENT_SESSION': '1'}), 'agent')
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(SystemExit), mock.patch('sys.stderr', new_callable=io.StringIO):
             ctl.main(['--agent', '--json', 'status'])
         out = io.StringIO()
         with mock.patch('sys.stdout', out):

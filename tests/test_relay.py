@@ -227,7 +227,7 @@ class CliTests(unittest.TestCase):
             with mock.patch('sys.stderr', new_callable=io.StringIO) as err:
                 self.assertEqual(relay.main(['--config', path, '--check', '--json']), 1)
             self.assertEqual(json.loads(err.getvalue())['error'], 'config_permissions_must_be_private')
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(SystemExit), mock.patch('sys.stderr', new_callable=io.StringIO):
             relay.main(['--config', 'x', '--agent', '--json'])
 
 
