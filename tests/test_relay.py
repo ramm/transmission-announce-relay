@@ -18,7 +18,8 @@ def make_config(port=0):
     raw = {'listen': {'host': '127.0.0.1', 'port': 19053}, 'routes': {
         'example': {'upstream': 'https://tracker.example.org:8443/PASSKEY/announce'},
         'strict': {'upstream': 'https://tracker.example.org/announce', 'info_hashes': [HASH.hex()]},
-        'noscrape': {'upstream': 'https://tracker.example.org/a/b'}}}
+        'noscrape': {'upstream': 'https://tracker.example.org/a/b'},
+        'scrapeoff': {'upstream': 'https://tracker.example.org/announce', 'scrape': False}}}
     validated = config.validate(raw)
     validated['listen']['port'] = port
     return validated
@@ -71,9 +72,10 @@ class ServerTests(unittest.TestCase):
         self.get('/r/example/scrape?info_hash=abc')
         self.server.routes['example'].fetch.assert_called_once_with(
             '/PASSKEY/scrape?info_hash=abc', 'Transmission/4.0', deadline=mock.ANY, on_headers=mock.ANY, handle=mock.ANY)
-        status, _, _ = self.get('/r/noscrape/scrape?info_hash=abc')
-        self.assertEqual(status, 404)
-        self.server.routes['noscrape'].fetch.assert_not_called()
+        for name in ('noscrape', 'scrapeoff'):
+            status, _, _ = self.get('/r/{}/scrape?info_hash=abc'.format(name))
+            self.assertEqual(status, 404)
+            self.server.routes[name].fetch.assert_not_called()
 
     def test_unknown_routes_and_bad_requests_never_forward(self):
         for path in ('/r/missing/announce?' + self.query, '/r/example/other?x=1', '/x', '/r/example/announce?info_hash=a&info_hash=b',
@@ -94,7 +96,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         health = json.loads(body)
         self.assertEqual(health['recovery_policy'], relay.RECOVERY_POLICY)
-        self.assertEqual(sorted(health['routes']), ['example', 'noscrape', 'strict'])
+        self.assertEqual(sorted(health['routes']), ['example', 'noscrape', 'scrapeoff', 'strict'])
         self.assertNotIn('PASSKEY', body.decode())
 
     def test_upstream_failure_is_safe_and_redirects_not_followed(self):
@@ -162,6 +164,36 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(pool.submit(self.get, '/r/example/announce?' + other).result(timeout=3)[0], 200)
             release.set()
             self.assertEqual(first.result(timeout=3)[0], 200)
+
+
+class PriorityTests(unittest.TestCase):
+    def test_announces_start_before_queued_scrapes(self):
+        from transmission_announce_relay import dispatch
+        order = []
+        release = threading.Event()
+
+        def fetch(target, ua, **kwargs):
+            order.append(target)
+            if target == '/first':
+                release.wait(timeout=3)
+            return 200, {}, BODY
+        stopping = threading.Event()
+        dispatcher = dispatch.Dispatcher(fetch, lambda body: False, lambda body: True, stopping)
+        try:
+            with mock.patch.object(recovery, 'PACE', 0.3), mock.patch.object(recovery, 'HEDGE_AFTER', 5.0), \
+                    concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                first = pool.submit(dispatcher.submit, '/first', 'ua')
+                while not order:
+                    time.sleep(0.01)
+                scrape = pool.submit(dispatcher.submit, '/scrape', 'ua', 1)
+                time.sleep(0.05)
+                announce = pool.submit(dispatcher.submit, '/announce', 'ua', 0)
+                release.set()
+                for future in (first, scrape, announce):
+                    future.result(timeout=5)
+            self.assertEqual(order, ['/first', '/announce', '/scrape'])
+        finally:
+            dispatcher.close()
 
 
 class FetchTests(unittest.TestCase):

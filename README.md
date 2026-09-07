@@ -196,7 +196,11 @@ Output modes: human (default), `--agent` (deterministic tab-separated), `--json`
   credentials). One route per tracker; each route has its own scheduler.
 - `routes.<name>.info_hashes` (optional) restricts the route to listed torrents.
 - Scrape: `/r/<name>/scrape` is mapped when the upstream path contains
-  `announce` (the usual `.../announce` → `.../scrape` convention).
+  `announce` (the usual `.../announce` → `.../scrape` convention). Set
+  `"scrape": false` on a route to answer scrapes with `404` locally — useful when
+  the tracker does not implement scrape, since Transmission scrapes every
+  routed torrent and each scrape would otherwise take an announce slot.
+  Announces are always started before waiting scrapes.
 - `GET /healthz` returns status and counters per route (queue depth, in-flight,
   hedges, hedge wins, requeues, transport and HTTP errors, expired announces)
   plus each route's upstream hostname — but no paths, passkeys, query strings

@@ -39,6 +39,8 @@ class ConfigTests(unittest.TestCase):
             ({'routes': {'x': {'upstream': 'https://u:p@t.example.org/announce'}}}, 'route_upstream_must_be_clean_https_url'),
             ({'routes': {'x': {'upstream': 'https://t.example.org/announce', 'info_hashes': ['zz']}}}, 'invalid_info_hashes'),
             ({'routes': GOOD['routes'], 'extra': 1}, 'unknown_config_keys'),
+            ({'routes': {'x': {'upstream': 'https://t.example.org/announce', 'scrape': 'no'}}}, 'invalid_scrape_flag'),
+            ({'routes': {'x': {'upstream': 'https://t.example.org/announce', 'bogus': 1}}}, 'unknown_route_keys'),
         ]
         for raw, code in cases:
             with self.assertRaisesRegex(config.ConfigError, code):

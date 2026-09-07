@@ -276,7 +276,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         kind = parts[3]
         upstream_path = route.spec['path']
         if kind == 'scrape':
-            if 'announce' not in upstream_path:
+            if not route.spec.get('scrape', True) or 'announce' not in upstream_path:
                 return self.respond(404, b'scrape not available\n', {})
             upstream_path = upstream_path[::-1].replace('announce'[::-1], 'scrape'[::-1], 1)[::-1]
         metadata = {}
@@ -301,7 +301,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         base = {'event': 'request', 'route': route.name, 'kind': kind, 'time': int(time.time())}
         base.update(metadata)
         try:
-            status, headers, body, queue_wait_ms, attempts, coalesced = route.dispatcher.submit(target, user_agent)
+            status, headers, body, queue_wait_ms, attempts, coalesced = route.dispatcher.submit(
+                target, user_agent, priority=1 if kind == 'scrape' else 0)
             record = classify(status, body, kind)
             record.update(base, elapsed_ms=round((time.monotonic() - started) * 1000),
                           queue_wait_ms=queue_wait_ms, upstream_attempts=attempts, coalesced=coalesced)

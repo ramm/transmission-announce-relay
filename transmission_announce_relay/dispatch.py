@@ -50,9 +50,9 @@ class Handle:
 class Item:
     __slots__ = ('key', 'target', 'user_agent', 'future', 'arrived', 'deadline', 'attempts',
                  'not_before', 'state', 'handles', 'first_start', 'failed_sockets',
-                 'failed_http', 'last_failure')
+                 'failed_http', 'last_failure', 'priority')
 
-    def __init__(self, key, target, user_agent, now):
+    def __init__(self, key, target, user_agent, now, priority=0):
         self.key = key
         self.target = target
         self.user_agent = user_agent
@@ -67,6 +67,7 @@ class Item:
         self.failed_sockets = 0
         self.failed_http = 0
         self.last_failure = None  # ('result', (status, headers, body)) or ('error', exc)
+        self.priority = priority  # lower starts first among ready items (announces before scrapes)
 
 
 class Dispatcher:
@@ -91,7 +92,7 @@ class Dispatcher:
         self.thread.start()
 
     # -- public ------------------------------------------------------------
-    def submit(self, target, user_agent):
+    def submit(self, target, user_agent, priority=0):
         key = (target, user_agent)
         with self.cond:
             item = self.items.get(key)
@@ -101,7 +102,7 @@ class Dispatcher:
             else:
                 if len(self.items) >= MAX_ITEMS or self.stopping.is_set():
                     raise queue.Full()
-                item = Item(key, target, user_agent, time.monotonic())
+                item = Item(key, target, user_agent, time.monotonic(), priority)
                 self.items[key] = item
                 self.max_queue_depth = max(self.max_queue_depth, self.waiting_count())
                 self.cond.notify_all()
@@ -161,7 +162,7 @@ class Dispatcher:
                     if item.not_before > now:
                         wake = min(wake, min(item.not_before, item.deadline))
                         continue
-                    if pick is None or item.arrived < pick.arrived:
+                    if pick is None or (item.priority, item.arrived) < (pick.priority, pick.arrived):
                         pick = item
                 if pick is not None:
                     earliest = now if self.last_start is None else self.last_start + recovery.PACE

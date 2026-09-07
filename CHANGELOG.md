@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Relay: per-route `"scrape": false` answers scrapes locally with `404`;
+  announces are scheduled before waiting scrapes.
+
 ## 0.1.1
 
 - `tar-ctl`: tolerate Transmission re-serialising tracker lists (it appends a

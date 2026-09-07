@@ -67,8 +67,15 @@ def validate(raw):
                     any(not isinstance(h, str) or not re.fullmatch('[0-9a-fA-F]{40}', h) for h in hashes)):
                 raise ConfigError('invalid_info_hashes')
             hashes = sorted({h.lower() for h in hashes})
+        scrape = route.get('scrape', True)
+        if type(scrape) is not bool:
+            raise ConfigError('invalid_scrape_flag')
+        unknown_route_keys = set(route) - {'upstream', 'info_hashes', 'scrape'}
+        if unknown_route_keys:
+            raise ConfigError('unknown_route_keys')
         validated[name] = {'upstream': route['upstream'], 'host': url.hostname,
-                           'port': url.port or 443, 'path': url.path, 'info_hashes': hashes}
+                           'port': url.port or 443, 'path': url.path, 'info_hashes': hashes,
+                           'scrape': scrape}
     log = raw.get('log')
     if log is not None and (not isinstance(log, dict) or not isinstance(log.get('path'), str)):
         raise ConfigError('invalid_log')
