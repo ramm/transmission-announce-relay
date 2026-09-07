@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Packaging: build from source again on Python 3.8 (setuptools 61+); no code changes.
+
 ## 0.1.2
 
 - Relay: per-route `"scrape": false` answers scrapes locally with `404`;
