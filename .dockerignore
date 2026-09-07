@@ -1,0 +1,6 @@
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!transmission_announce_relay/
+transmission_announce_relay/__pycache__/

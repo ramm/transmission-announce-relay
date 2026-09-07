@@ -1,0 +1,8 @@
+{
+  "listen": {"host": "127.0.0.1", "port": 19053},
+  "routes": {
+    "example": {
+      "upstream": "https://tracker.example.org:8443/REPLACE_WITH_YOUR_PASSKEY/announce"
+    }
+  }
+}

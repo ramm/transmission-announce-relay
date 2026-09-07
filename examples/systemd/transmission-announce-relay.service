@@ -1,0 +1,22 @@
+# User unit: ~/.config/systemd/user/transmission-announce-relay.service
+# Enable with:  systemctl --user enable --now transmission-announce-relay
+# Keep it running after logout:  loginctl enable-linger $USER
+[Unit]
+Description=Local announce relay for Transmission
+After=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=%h/.local/bin/transmission-announce-relay --config %h/.config/transmission-announce-relay/relay.json --json
+Restart=always
+RestartSec=5
+TimeoutStartSec=15
+UMask=0077
+NoNewPrivileges=true
+# Optional: keep request logs private instead of the journal
+# StandardOutput=append:%h/.local/state/transmission-announce-relay/relay.log
+# StandardError=append:%h/.local/state/transmission-announce-relay/relay.log
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+.pi/
+uv.lock
+*.json.tmp
+relay.json
+!examples/relay.json
+routes.json

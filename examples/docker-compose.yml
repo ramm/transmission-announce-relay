@@ -1,0 +1,19 @@
+# The relay must share a network namespace with Transmission, because Transmission
+# announces to 127.0.0.1. Either run both with host networking (below) or add
+# `network_mode: "service:transmission"` to the relay service.
+services:
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    network_mode: host
+    volumes:
+      - ./transmission:/config
+      - ./downloads:/downloads
+  announce-relay:
+    build: https://github.com/ramm/transmission-announce-relay.git
+    network_mode: host
+    # relay.json is mode 600; run as its owner so the relay can read it.
+    user: "${UID:-1000}:${GID:-1000}"
+    command: ["--config", "/config/relay.json", "--json"]
+    volumes:
+      - ./relay:/config:ro   # contains relay.json (chmod 600)
+    restart: unless-stopped
