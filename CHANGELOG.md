@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4
 
 - Relay: optional `--tls-max-version {1.2,1.3}` caps upstream TLS for network
   compatibility. Omitted by default; system protocol policy and certificate /

@@ -233,8 +233,6 @@ transmission-announce-relay --config ~/.config/transmission-announce-relay/relay
   --tls-max-version 1.2 --json
 ```
 
-This option is available in the current source; it is not in the 0.1.3 release.
-
 `--tls-max-version` accepts `1.2` or `1.3` and applies to **all routes in that
 relay process**, not Transmission's peer connections or other applications.
 It is a maximum, not a request to force an exact version: the system minimum
