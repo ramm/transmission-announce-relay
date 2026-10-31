@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Relay: optional `--tls-max-version {1.2,1.3}` caps upstream TLS for network
+  compatibility. Omitted by default; system protocol policy and certificate /
+  hostname verification are preserved. `--check`, startup output and health
+  expose the requested ceiling.
+
 ## 0.1.3
 
 - Packaging: build from source again on Python 3.8 (setuptools 61+); no code changes.

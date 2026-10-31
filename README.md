@@ -206,12 +206,94 @@ Output modes: human (default), `--agent` (deterministic tab-separated), `--json`
   plus each route's upstream hostname — but no paths, passkeys, query strings
   or hashes. It is reachable by any local process, like the relay itself.
 
+## Upstream TLS compatibility
+
+By default the daemon leaves TLS version negotiation to Python/OpenSSL and the
+system policy. Some network paths allow TCP connections but stall TLS 1.3
+handshakes consistently; opening fresh or hedged connections cannot fix a
+protocol-specific stall. If verified TLS 1.2 connections succeed on the same
+path, opt into an upstream ceiling:
+
+```sh
+transmission-announce-relay --config ~/.config/transmission-announce-relay/relay.json \
+  --tls-max-version 1.2 --check --json
+transmission-announce-relay --config ~/.config/transmission-announce-relay/relay.json \
+  --tls-max-version 1.2 --json
+```
+
+This option is available in the current source; it is not in the 0.1.3 release.
+
+`--tls-max-version` accepts `1.2` or `1.3` and applies to **all routes in that
+relay process**, not Transmission's peer connections or other applications.
+It is a maximum, not a request to force an exact version: the system minimum
+and any stricter system maximum remain in effect. A ceiling below the system
+minimum is rejected. Certificate and hostname verification stay enabled;
+there is no insecure fallback or automatic downgrade on failure.
+
+`--check` validates the configuration and TLS policy without binding a port or
+contacting a tracker. The machine-readable `config_ok`/`ready` output and
+`/healthz` field `upstream_tls_max_version` report the **requested** ceiling
+(`null` when omitted), not a measured negotiated version.
+
+### Diagnose before changing the ceiling
+
+A relay `502` with logged `network_error` / `TimeoutError` means the upstream
+request failed; it is not itself a tracker rejection or proof of an account
+problem. Compare both TLS versions from the machine running the relay, using
+your tracker hostname in place of `tracker.example.org`:
+
+```sh
+curl -vI --connect-timeout 8 --max-time 12 --tlsv1.3 --tls-max 1.3 \
+  https://tracker.example.org/
+curl -vI --connect-timeout 8 --max-time 12 --tlsv1.2 --tls-max 1.2 \
+  https://tracker.example.org/
+```
+
+Use a curl build that supports both protocols. `--tlsv1.2` alone sets a
+**minimum** and can still negotiate TLS 1.3; the matching `--tls-max` matters.
+Do not add `-k` or disable verification. These probes check TLS connectivity,
+not a real announce: tracker roots can return errors even when the real
+announce endpoint works. Do not put passkey-containing URLs in shared logs.
+A successful `--check` is likewise not proof of upstream reachability.
+
+### Apply to a systemd user service
+
+For the bundled example unit, use
+`systemctl --user edit transmission-announce-relay` and add:
+
+```ini
+[Service]
+ExecStart=
+ExecStart=%h/.local/bin/transmission-announce-relay --config %h/.config/transmission-announce-relay/relay.json --json --tls-max-version 1.2
+```
+
+If your installation uses a different launcher, config path or extra flags,
+retain those values; inspect `systemctl --user cat transmission-announce-relay`
+first. Then reload and restart **only the relay**, not Transmission:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user restart transmission-announce-relay
+curl -fsS http://127.0.0.1:19053/healthz
+```
+
+Adjust the health port if configured differently. Confirm the requested
+ceiling in health output, then watch normal announces recover in Transmission
+or with `tar-ctl status`. A relay restart does not clear Transmission's existing
+retry backoff, so recovery may take hours after a prolonged outage. Avoid
+forcing a burst of announces just to clear the display.
+
+To undo, remove only `--tls-max-version 1.2` from your service command, preserving
+other overrides, then reload and restart the relay again. Prefer the default
+unless you have verified a protocol-specific connectivity problem.
+
 ## Operational notes
 
 - **Which torrents to route.** Any torrent whose tracker is on the affected
   path. `tar-ctl route --tracker-host …` handles hundreds of torrents in one
   paced run; a relay restart while torrents are routed only fails the announces
-  in flight, which Transmission retries 20 s later.
+  in flight. Transmission retries on its own schedule; existing failure
+  backoff is not reset by restarting the relay.
 - **Capacity.** One announce start per 3 s per route is ~1,200/hour, plenty
   for several hundred torrents at a typical 30–45 minute interval. Bursts
   (starting many torrents at once, or many torrents retrying rejections every
@@ -245,9 +327,11 @@ Output modes: human (default), `--agent` (deterministic tab-separated), `--json`
 python -m unittest discover -s tests -v
 ```
 
-Tests use fake sockets and a fake Transmission; nothing touches the network.
-The dispatcher's timing constants are patched down in tests so the suite runs
-in seconds.
+Tests use fake upstream sockets, a fake Transmission, and loopback HTTP servers;
+no external network is contacted. TLS policy tests also perform real in-memory
+handshakes using `ssl.MemoryBIO`; they generate a temporary certificate with the
+`openssl` executable and are skipped if it is unavailable. The dispatcher's
+timing constants are patched down so the suite runs in seconds.
 
 ## License
 

@@ -27,6 +27,22 @@ from .output import Output, resolve_mode
 MAX_RESPONSE = 1024 * 1024
 MAX_QUERY = 8192
 RECOVERY_POLICY = 'paced-hedge-requeue-v4'
+TLS_MAX_VERSIONS = {'1.2': ssl.TLSVersion.TLSv1_2, '1.3': ssl.TLSVersion.TLSv1_3}
+
+
+def upstream_tls_context(max_version=None):
+    """Verified upstream TLS, optionally capped without weakening system policy."""
+    if max_version is not None and max_version not in TLS_MAX_VERSIONS:
+        raise ValueError('invalid_tls_max_version')
+    tls = ssl.create_default_context()
+    tls.set_alpn_protocols(['http/1.1'])
+    if max_version is not None:
+        ceiling = TLS_MAX_VERSIONS[max_version]
+        if tls.minimum_version > ceiling:
+            raise ValueError('tls_max_version_below_system_minimum')
+        if tls.maximum_version == ssl.TLSVersion.MAXIMUM_SUPPORTED or tls.maximum_version > ceiling:
+            tls.maximum_version = ceiling
+    return tls
 
 
 def bdecode(data):
@@ -204,12 +220,12 @@ class Relay(http.server.ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, config, output):
+    def __init__(self, config, output, tls_max_version=None):
         self.config = config
         self.output = output
         self.started = int(time.time())
-        tls = ssl.create_default_context()
-        tls.set_alpn_protocols(['http/1.1'])
+        self.tls_max_version = tls_max_version
+        tls = upstream_tls_context(tls_max_version)
         self.routes = {name: Route(name, spec, tls, output) for name, spec in config['routes'].items()}
         super().__init__((config['listen']['host'], config['listen']['port']), Handler)
 
@@ -221,6 +237,7 @@ class Relay(http.server.ThreadingHTTPServer):
     def health(self):
         return {'status': 'ready', 'started': self.started, 'recovery_policy': RECOVERY_POLICY,
                 'upstream_http': '1.1', 'fresh_connection_per_request': True,
+                'upstream_tls_max_version': self.tls_max_version,
                 'max_attempts': recovery.MAX_ATTEMPTS,
                 'announce_deadline_seconds': recovery.ANNOUNCE_DEADLINE,
                 'routes': {name: route.stats() for name, route in self.routes.items()}}
@@ -338,7 +355,11 @@ def notify_ready():
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='transmission-announce-relay', description=__doc__.split('\n')[0])
     parser.add_argument('--config', required=True, help='private JSON config (chmod 600)')
-    parser.add_argument('--check', action='store_true', help='validate the config and exit')
+    parser.add_argument('--check', action='store_true', help='validate the config and TLS policy, then exit')
+    # Validate through the shared output path, so --json errors remain JSON and
+    # never echo an arbitrary (potentially sensitive) invalid argument.
+    parser.add_argument('--tls-max-version', metavar='{1.2,1.3}',
+                        help='cap upstream TLS at 1.2 or 1.3 (default: system negotiation; all routes)')
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--agent', action='store_true')
     modes.add_argument('--json', action='store_true')
@@ -346,14 +367,18 @@ def main(argv=None):
     output = Output(resolve_mode(args.agent, args.json))
     server = None
     try:
+        if args.tls_max_version is not None and args.tls_max_version not in TLS_MAX_VERSIONS:
+            raise ValueError('invalid_tls_max_version')
         config = config_module.load(args.config)
         if args.check:
+            upstream_tls_context(args.tls_max_version)
             output.emit({'event': 'config_ok', 'routes': sorted(config['routes']),
-                         'listen': '{}:{}'.format(config['listen']['host'], config['listen']['port'])})
+                         'listen': '{}:{}'.format(config['listen']['host'], config['listen']['port']),
+                         'upstream_tls_max_version': args.tls_max_version})
             return 0
-        server = Relay(config, output)
+        server = Relay(config, output, tls_max_version=args.tls_max_version)
         output.emit({'event': 'ready', 'listen': '{}:{}'.format(*server.server_address[:2]),
-                     'routes': sorted(config['routes'])})
+                     'routes': sorted(config['routes']), 'upstream_tls_max_version': args.tls_max_version})
         notify_ready()
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
