@@ -6,6 +6,10 @@
   compatibility. Omitted by default; system protocol policy and certificate /
   hostname verification are preserved. `--check`, startup output and health
   expose the requested ceiling.
+- `tar-ctl`: new `prune [--apply]` forgets state entries for torrents no
+  longer in Transmission; `status` and `restore` report them as
+  `missing_from_transmission` instead of leaving `routed_in_state > present`
+  unexplained (#1).
 
 ## 0.1.3
 

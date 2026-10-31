@@ -168,6 +168,18 @@ mode 600) *before* Transmission is changed, so `restore` can put back exactly
 what was there. `restore` refuses a torrent whose tracker list changed since
 routing unless `--force`.
 
+`prune` forgets state entries whose torrent is no longer in Transmission
+(deleted or trumped by the tracker, manual cleanup). Like `route` and
+`restore` it is a dry run unless `--apply` is given; it never touches
+Transmission. `status` reports such entries as `missing_from_transmission`,
+so `routed_in_state > present` is never ambiguous: a torrent that is present
+but failing shows up in `present` and not in `latest_announce_ok`.
+
+```sh
+tar-ctl prune            # dry run: lists what would be forgotten
+tar-ctl prune --apply
+```
+
 `--pace SECONDS` (default 5) spaces out changes. `--reannounce` asks
 Transmission for an announce after each change; without it Transmission
 re-announces on its own schedule, which usually is what you want.
@@ -302,7 +314,8 @@ unless you have verified a protocol-specific connectivity problem.
 - **Retired torrents.** Trackers answer deleted/trumped torrents with a
   `failure reason`; the relay passes that through unchanged and never retries
   it. Such torrents keep re-announcing on Transmission's failure backoff; pause
-  or remove them.
+  or remove them. After removing routed torrents, `tar-ctl prune --apply` drops
+  their leftover state entries.
 - **Restart safety.** `tar-ctl restore` needs only Transmission, not the relay.
   If the relay is unreachable, routed torrents simply fail their announces until
   it is back or they are restored.

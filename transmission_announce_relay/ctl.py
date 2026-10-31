@@ -40,6 +40,12 @@ def load_state(path):
     return state
 
 
+def missing_hashes(known, rows):
+    """State entries whose torrent Transmission no longer has (removed, trumped, cleaned up)."""
+    present = {row['hashString'].lower() for row in rows}
+    return sorted(hash_string for hash_string in known if hash_string.lower() not in present)
+
+
 def save_state(path, state):
     directory = os.path.dirname(path)
     if directory:
@@ -278,7 +284,31 @@ def cmd_restore(client, output, args):
             client.reannounce(row['hashString'])
         done += 1
         output.emit({'event': 'restored', 'id': row['id']})
-    output.emit({'event': 'done', 'restored': done, 'still_routed': len(known)})
+    output.emit({'event': 'done', 'restored': done, 'still_routed': len(known),
+                 'missing_from_transmission': len(missing_hashes(known, rows))})
+    return 0
+
+
+def cmd_prune(client, output, args):
+    state = load_state(args.state)
+    known = state['torrents']
+    rows = client.torrents(list(known), ['id', 'hashString']) if known else []
+    missing = missing_hashes(known, rows)
+    output.emit({'event': 'plan', 'routed_in_state': len(known), 'missing_from_transmission': len(missing),
+                 'apply': bool(args.apply)})
+    if not args.apply:
+        for hash_string in missing[:args.show]:
+            entry = known[hash_string]
+            output.emit({'event': 'would_forget', 'hash': hash_string[:8], 'route': entry.get('route'),
+                         'since': entry.get('since')})
+        return 0
+    forgotten = [(hash_string, known.pop(hash_string)) for hash_string in missing]
+    if forgotten:
+        save_state(args.state, state)  # one durable write; Transmission is not touched
+    for hash_string, entry in forgotten:
+        output.emit({'event': 'forgotten', 'hash': hash_string[:8], 'route': entry.get('route'),
+                     'since': entry.get('since')})
+    output.emit({'event': 'done', 'forgotten': len(missing), 'still_routed': len(known), 'state': args.state})
     return 0
 
 
@@ -288,6 +318,7 @@ def cmd_status(client, output, args):
     rows = client.torrents(list(routed_hashes)) if routed_hashes else []
     ok = sum(any(s.get('lastAnnounceSucceeded') for s in (row.get('trackerStats') or [])) for row in rows)
     result = {'event': 'status', 'routed_in_state': len(routed_hashes), 'present': len(rows),
+              'missing_from_transmission': len(missing_hashes(routed_hashes, rows)),
               'latest_announce_ok': ok, 'state': args.state}
     try:
         health = relay_health(args.relay_url)
@@ -339,6 +370,10 @@ def build_parser():
     restore.add_argument('--force', action='store_true', help='restore even if the list changed since routing')
     restore.add_argument('--show', type=int, default=20)
 
+    prune = commands.add_parser('prune', help='forget state entries for torrents no longer in Transmission')
+    prune.add_argument('--apply', action='store_true', help='make changes (default: dry run)')
+    prune.add_argument('--show', type=int, default=20, help='dry-run rows to print')
+
     commands.add_parser('status', help='relay health and routed-torrent summary')
     return parser
 
@@ -350,7 +385,8 @@ def main(argv=None):
         if getattr(args, 'pace', MIN_PACE) < MIN_PACE:
             raise ValueError('pace_too_short')
         client = rpc.Client(args.rpc_url, args.rpc_user, args.rpc_password)
-        handler = {'list': cmd_list, 'route': cmd_route, 'restore': cmd_restore, 'status': cmd_status}[args.command]
+        handler = {'list': cmd_list, 'route': cmd_route, 'restore': cmd_restore, 'prune': cmd_prune,
+                   'status': cmd_status}[args.command]
         return handler(client, output, args)
     except Exception as exc:
         message = str(exc)

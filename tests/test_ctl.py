@@ -169,11 +169,46 @@ class CommandTests(unittest.TestCase):
         self.run_cli('route', '--route', 'example', '--tracker-host', 'tracker.example.org', '--apply')
         code, events, _ = self.run_cli('status')
         self.assertEqual(code, 0)
-        self.assertEqual((events[0]['routed_in_state'], events[0]['latest_announce_ok'], events[0]['relay']), (3, 3, 'ready'))
+        self.assertEqual((events[0]['routed_in_state'], events[0]['present'], events[0]['missing_from_transmission'],
+                          events[0]['latest_announce_ok'], events[0]['relay']), (3, 3, 0, 3, 'ready'))
         with mock.patch.object(ctl, 'relay_health', side_effect=OSError):
             code, events, _ = self.run_cli('status')
         self.assertEqual(events[0]['relay'], 'unreachable')
         self.assertNotIn('PASSKEY', json.dumps(events))
+
+    def test_status_and_restore_count_torrents_removed_from_transmission(self):
+        self.run_cli('route', '--route', 'example', '--tracker-host', 'tracker.example.org', '--apply')
+        del self.client.rows['d' * 40]  # deleted / trumped on the tracker side, removed from Transmission
+        code, events, _ = self.run_cli('status')
+        self.assertEqual(code, 0)
+        self.assertEqual((events[0]['routed_in_state'], events[0]['present'], events[0]['missing_from_transmission']),
+                         (3, 2, 1))
+        code, events, errors = self.run_cli('restore', '--ids', '1', '--apply')
+        self.assertEqual(code, 0, errors)
+        self.assertEqual(events[-1], {'event': 'done', 'restored': 1, 'still_routed': 2, 'missing_from_transmission': 1})
+        self.assertEqual(sorted(ctl.load_state(self.state)['torrents']), ['b' * 40, 'd' * 40])  # restore never forgets
+
+    def test_prune_forgets_only_missing_torrents_and_is_dry_run_by_default(self):
+        self.run_cli('route', '--route', 'example', '--tracker-host', 'tracker.example.org', '--apply')
+        del self.client.rows['d' * 40]
+        code, events, errors = self.run_cli('prune')
+        self.assertEqual(code, 0, errors)
+        self.assertEqual(events[0], {'event': 'plan', 'routed_in_state': 3, 'missing_from_transmission': 1, 'apply': False})
+        self.assertEqual((events[1]['event'], events[1]['hash'], events[1]['route']), ('would_forget', 'dddddddd', 'example'))
+        self.assertEqual(sorted(ctl.load_state(self.state)['torrents']), ['a' * 40, 'b' * 40, 'd' * 40])
+        code, events, errors = self.run_cli('prune', '--apply')
+        self.assertEqual(code, 0, errors)
+        self.assertEqual([e['event'] for e in events], ['plan', 'forgotten', 'done'])
+        self.assertEqual((events[-1]['forgotten'], events[-1]['still_routed']), (1, 2))
+        self.assertEqual(sorted(ctl.load_state(self.state)['torrents']), ['a' * 40, 'b' * 40])
+        self.assertEqual([c for c in self.client.calls if c[0] != 'set'], [])  # Transmission is never modified
+        self.assertNotIn('PASSKEY', json.dumps(events))
+        # Present torrents are still restorable afterwards; a clean state is a no-op prune.
+        code, events, _ = self.run_cli('restore', '--all', '--apply')
+        self.assertEqual(events[-1]['still_routed'], 0)
+        code, events, _ = self.run_cli('prune', '--apply')
+        self.assertEqual(events, [{'event': 'plan', 'routed_in_state': 0, 'missing_from_transmission': 0, 'apply': True},
+                                  {'event': 'done', 'forgotten': 0, 'still_routed': 0, 'state': self.state}])
 
     def test_output_modes(self):
         self.assertEqual(ctl.resolve_mode(environ={}), 'human')
